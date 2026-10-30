@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Customer Dashboard - Appointment Booking</title>
+    <!-- Bootstrap 5 CDN for responsive mobile-friendly layout -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">Customer Dashboard</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse justify-content-end" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#" onclick="showSection('searchSection')">Find Providers</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" onclick="showSection('appointmentsSection')">My Appointments</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-warning" href="index.html">Logout</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container my-4">
+
+        <!-- SECTION 1: SEARCH & BOOK PROVIDERS -->
+        <div id="searchSection" class="content-section">
+            <h2 class="mb-3">Find & Book a Service Provider</h2>
+            
+            <!-- Search Filter Bar -->
+            <div class="card shadow-sm p-3 mb-4">
+                <div class="row g-3">
+                    <div class="col-md-5">
+                        <input type="text" class="form-control" id="searchName" placeholder="Search by provider name (e.g., Doctor, Stylist)">
+                    </div>
+                    <div class="col-md-5">
+                        <select class="form-select" id="searchCategory">
+                            <option value="">All Categories</option>
+                            <option value="doctor">Doctor</option>
+                            <option value="salon">Salon Stylist</option>
+                            <option value="tutor">Tutor</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <button class="btn btn-dark w-100" onclick="searchProviders()">Search</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Provider Results List -->
+            <div class="row" id="providerResults">
+                <!-- Example Provider Card (Dynamic data will load here from your Python API later) -->
+                <div class="col-md-4 mb-3">
+                    <div class="card shadow-sm">
+                        <div class="card-body">
+                            <h5 class="card-title">Dr. John Smith</h5>
+                            <h6 class="card-subtitle mb-2 text-muted">Category: Doctor</h6>
+                            <p class="card-text">Available working hours: 09:00 AM - 05:00 PM</p>
+                            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#bookingModal">View Slots & Book</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 2: MY APPOINTMENTS -->
+        <div id="appointmentsSection" class="content-section" style="display: none;">
+            <h2 class="mb-3">My Appointments (Upcoming & Past)</h2>
+            <div class="card shadow-sm p-3">
+                <table class="table table-striped">
+                    <thead>
+                        <tr>
+                            <th>Reference ID</th>
+                            <th>Provider</th>
+                            <th>Date & Time</th>
+                            <th>Status</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="appointmentTableBody">
+                        <!-- Example row -->
+                        <tr>
+                            <td>APT-2026-000123</td>
+                            <td>Dr. John Smith</td>
+                            <td>2026-11-05 10:00 AM</td>
+                            <td><span class="badge bg-success">Confirmed</span></td>
+                            <td>
+                                <button class="btn btn-danger btn-sm">Cancel / Reschedule</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Booking Slot Modal -->
+    <div class="modal fade" id="bookingModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Select Date & Time Slot</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="bookingForm">
+                        <div class="mb-3">
+                            <label class="form-label">Choose Date (Within next 30 days)</label>
+                            <input type="date" class="form-control" id="bookingDate" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Available Slots</label>
+                            <select class="form-select" id="slotSelect" required>
+                                <option value="">-- Select a time slot --</option>
+                                <option value="10:00">10:00 AM - 10:30 AM</option>
+                                <option value="10:30">10:30 AM - 11:00 AM</option>
+                                <option value="11:00">11:00 AM - 11:30 AM</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-success w-100">Confirm Booking</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Simple script to toggle between sections without page reload
+        function showSection(sectionId) {
+            document.getElementById('searchSection').style.display = 'none';
+            document.getElementById('appointmentsSection').style.display = 'none';
+            document.getElementById(sectionId).style.display = 'block';
+
+            // Update active navbar link
+            document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+
+        // Placeholder for booking submission
+        document.getElementById('bookingForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            alert('Slot booked successfully! Booking reference generated.');
+            var modal = bootstrap.Modal.getInstance(document.getElementById('bookingModal'));
+            modal.hide();
+        });
+
+        function searchProviders() {
+            // Future connection point to Python/Flask backend API
+            alert('Searching providers...');
+        }
+    </script>
+</body>
+</html>
