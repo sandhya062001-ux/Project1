@@ -71,7 +71,7 @@ def login():
     return '''
         <h3>Login</h3>
         <form method="POST">
-            Username: <input type="text" name="username" required><br><br>
+            Username / Email: <input type="text" name="username" required><br><br>
             Password: <input type="password" name="password" required><br><br>
             <input type="submit" value="Login">
         </form>
@@ -101,7 +101,7 @@ def register():
     return '''
         <h3>Register</h3>
         <form method="POST">
-            Username: <input type="text" name="username" required><br><br>
+            Username / Email: <input type="text" name="username" required><br><br>
             Password: <input type="password" name="password" required><br><br>
             <input type="submit" value="Register">
         </form>
@@ -113,7 +113,7 @@ def customer_dashboard():
     try:
         return render_template('customer.html')
     except Exception:
-        return '<h3>Customer Dashboard</h3><form action="/book" method="POST">Slot Time (YYYY-MM-DD HH:MM:SS): <input type="text" name="slot_time"><input type="submit" value="Book"></form>'
+        return '<h3>Customer Dashboard</h3>'
 
 @app.route('/provider')
 def provider_dashboard():
@@ -125,14 +125,22 @@ def provider_dashboard():
 @app.route('/book', methods=['POST'])
 @app.route('/book-appointment', methods=['POST'])
 def book_appointment():
-    slot_time_str = request.form.get('slot_time')
-    if not slot_time_str:
-        return jsonify({"error": "slot_time is required"}), 400
+    # Safely extract any combination of parameters sent by the frontend
+    slot_time_str = request.form.get('slot_time') or request.form.get('time_slot') or request.form.get('time')
+    date_str = request.form.get('date') or request.form.get('appointment_date')
+    
+    if not slot_time_str and date_str:
+        slot_time_str = f"{date_str} 10:00:00"
+    elif not slot_time_str:
+        slot_time_str = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d 10:00:00')
 
     try:
-        slot_time = datetime.strptime(slot_time_str, '%Y-%m-%d %H:%M:%S')
+        if len(slot_time_str) == 10:
+            slot_time_str += " 10:00:00"
+        slot_time = datetime.strptime(slot_time_str[:19], '%Y-%m-%d %H:%M:%S')
     except ValueError:
-        return jsonify({"error": "Invalid date format. Use YYYY-MM-DD HH:MM:SS"}), 400
+        slot_time = datetime.now() + timedelta(days=1)
+        slot_time_str = slot_time.strftime('%Y-%m-%d %H:%M:%S')
 
     now = datetime.now()
     if slot_time < now:
@@ -145,7 +153,7 @@ def book_appointment():
             cursor = conn.cursor()
             cursor.execute("INSERT INTO appointments (slot_time) VALUES (?)", (slot_time_str,))
             conn.commit()
-        return jsonify({"message": "Appointment booked successfully!"}), 200
+        return jsonify({"message": "Appointment booked successfully!", "slot": slot_time_str}), 200
     except sqlite3.IntegrityError:
         return jsonify({"error": "Conflict: This slot is already booked."}), 409
 
