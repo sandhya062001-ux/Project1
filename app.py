@@ -28,7 +28,7 @@ def init_db():
             )
         ''')
         
-        # Seed test users
+        # Seed default user if not exists
         cursor.execute("SELECT * FROM users WHERE username=?", ('customer@example.com',))
         if not cursor.fetchone():
             cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", ('customer@example.com', 'password123', 'customer'))
@@ -39,7 +39,10 @@ init_db()
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    try:
+        return render_template('index.html')
+    except Exception:
+        return '<h2>Appointment Booking System - Running</h2><p><a href="/login">Login</a> | <a href="/register">Register</a></p>'
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -65,12 +68,11 @@ def login():
         except Exception as e:
             return f"Database Error: {str(e)}", 500
             
-    # Fallback login view if login.html doesn't exist
     return '''
         <h3>Login</h3>
         <form method="POST">
-            Username: <input type="text" name="username"><br><br>
-            Password: <input type="password" name="password"><br><br>
+            Username: <input type="text" name="username" required><br><br>
+            Password: <input type="password" name="password" required><br><br>
             <input type="submit" value="Login">
         </form>
         <br><a href="/register">Register new account</a>
@@ -99,8 +101,8 @@ def register():
     return '''
         <h3>Register</h3>
         <form method="POST">
-            Username: <input type="text" name="username"><br><br>
-            Password: <input type="password" name="password"><br><br>
+            Username: <input type="text" name="username" required><br><br>
+            Password: <input type="password" name="password" required><br><br>
             <input type="submit" value="Register">
         </form>
         <br><a href="/login">Back to Login</a>
@@ -108,13 +110,20 @@ def register():
 
 @app.route('/customer')
 def customer_dashboard():
-    return render_template('customer.html')
+    try:
+        return render_template('customer.html')
+    except Exception:
+        return '<h3>Customer Dashboard</h3><form action="/book" method="POST">Slot Time (YYYY-MM-DD HH:MM:SS): <input type="text" name="slot_time"><input type="submit" value="Book"></form>'
 
 @app.route('/provider')
 def provider_dashboard():
-    return render_template('provider.html')
+    try:
+        return render_template('provider.html')
+    except Exception:
+        return '<h3>Provider Dashboard</h3>'
 
 @app.route('/book', methods=['POST'])
+@app.route('/book-appointment', methods=['POST'])
 def book_appointment():
     slot_time_str = request.form.get('slot_time')
     if not slot_time_str:
