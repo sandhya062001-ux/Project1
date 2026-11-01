@@ -16,14 +16,22 @@ def init_db():
             password TEXT NOT NULL
         )
     ''')
-    # Insert default test user if missing
-    cursor.execute("SELECT * FROM users WHERE username='customer'")
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO users (username, password) VALUES ('customer', 'password123')")
+    
+    # Insert test users (both email format and standard username)
+    test_users = [
+        ('customer', 'password123'),
+        ('customer@example.com', 'password123'),
+        ('customer@test.com', 'password123')
+    ]
+    for user, pwd in test_users:
+        cursor.execute("SELECT * FROM users WHERE username=?", (user,))
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (user, pwd))
+            
     conn.commit()
     conn.close()
 
-# Initialize database table on start
+# Initialize database on app startup
 init_db()
 
 def get_db_connection():
@@ -38,7 +46,7 @@ def index():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form.get('username')
+        username = request.form.get('username') or request.form.get('email')
         password = request.form.get('password')
         
         try:
@@ -57,6 +65,24 @@ def login():
             return f"Database Error: {str(e)}", 500
             
     return render_template('login.html')
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form.get('username') or request.form.get('email')
+        password = request.form.get('password')
+        
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
+            conn.commit()
+            conn.close()
+            return redirect(url_for('login'))
+        except Exception as e:
+            return f"Registration Error: {str(e)}", 500
+            
+    return render_template('register.html')
 
 if __name__ == '__main__':
     app.run(debug=True)
