@@ -11,7 +11,7 @@ def init_db():
     with sqlite3.connect(DB_FILE, timeout=30) as conn:
         cursor = conn.cursor()
         
-        # 1. Users table
+        # 1. Users table with role and username constraints
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,8 +21,7 @@ def init_db():
             )
         ''')
         
-        # 2. Appointments table with UNIQUE constraint on slot_time
-        # Enforces NO DOUBLE BOOKING directly in the database schema
+        # 2. Appointments table with UNIQUE constraint on slot_time (Enforces 409 Conflict)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS appointments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,8 +32,7 @@ def init_db():
             )
         ''')
         
-        # --- SEED DATA: 10 TRIAL RECORDS FOR INTERVIEWER ---
-        # Seed test users
+        # --- SEED DATA: 10 TRIAL RECORDS FOR EVALUATION ---
         test_users = [
             ('customer', 'password123', 'customer'),
             ('customer@example.com', 'password123', 'customer'),
@@ -47,7 +45,6 @@ def init_db():
             if not cursor.fetchone():
                 cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (user, pwd, role))
 
-        # Seed initial appointment slots to equal at least 10 trial records across the DB
         seed_slots = [
             (1, '2026-11-05 09:00:00'),
             (1, '2026-11-05 10:00:00'),
@@ -59,7 +56,7 @@ def init_db():
             try:
                 cursor.execute("INSERT INTO appointments (customer_id, slot_time) VALUES (?, ?)", (cid, slot))
             except sqlite3.IntegrityError:
-                pass  # Slot already exists
+                pass
                 
         conn.commit()
 
@@ -99,14 +96,18 @@ def register():
     if request.method == 'POST':
         username = request.form.get('username') or request.form.get('email')
         password = request.form.get('password')
-        role = request.form.get('role', 'customer')
+        
+        if not username or not password:
+            return "Username and password are required", 400
         
         try:
             with sqlite3.connect(DB_FILE, timeout=30) as conn:
                 cursor = conn.cursor()
-                cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (username, password, role))
+                cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, 'customer')", (username, password))
                 conn.commit()
             return redirect(url_for('login'))
+        except sqlite3.IntegrityError:
+            return "Registration Error: Username already exists.", 400
         except Exception as e:
             return f"Registration Error: {str(e)}", 500
             
@@ -116,7 +117,7 @@ def register():
 
 @app.route('/book', methods=['POST'])
 def book_appointment():
-    slot_time_str = request.form.get('slot_time') # Format expected: 'YYYY-MM-DD HH:MM:SS'
+    slot_time_str = request.form.get('slot_time')
     if not slot_time_str:
         return jsonify({"error": "slot_time is required"}), 400
 
@@ -128,23 +129,23 @@ def book_appointment():
     now = datetime.now()
     max_date = now + timedelta(days=30)
 
-    # Rule 1: No booking in the past
+    # Rule 1: No past bookings
     if slot_time < now:
         return jsonify({"error": "Cannot book appointments in the past."}), 400
 
-    # Rule 2: Booking allowed only up to 30 days ahead
+    # Rule 2: 30-day window limit
     if slot_time > max_date:
         return jsonify({"error": "Booking allowed only up to 30 days ahead."}), 400
 
     try:
         with sqlite3.connect(DB_FILE, timeout=30) as conn:
             cursor = conn.cursor()
-            # Database UNIQUE constraint prevents two bookings on the exact same slot
+            # Database UNIQUE constraint prevents duplicate slots
             cursor.execute("INSERT INTO appointments (slot_time) VALUES (?)", (slot_time_str,))
             conn.commit()
         return jsonify({"message": "Appointment booked successfully!"}), 200
     except sqlite3.IntegrityError:
-        # Enforce 409 Conflict HTTP status code when double-booked at DB level
+        # Enforce 409 Conflict status code on double booking
         return jsonify({"error": "Conflict: This slot is already booked."}), 409
 
 @app.route('/cancel/<int:appointment_id>', methods=['POST'])
@@ -162,7 +163,7 @@ def cancel_appointment(appointment_id):
             slot_time = datetime.strptime(appointment['slot_time'], '%Y-%m-%d %H:%M:%S')
             now = datetime.now()
 
-            # Rule 3: Cancel or reschedule allowed only up to 2 hours before start time
+            # Rule 3: 2-hour cancellation buffer
             if (slot_time - now) < timedelta(hours=2):
                 return jsonify({"error": "Cannot cancel or reschedule within 2 hours of appointment start time."}), 400
 
