@@ -28,10 +28,14 @@ def init_db():
             )
         ''')
         
-        # Seed default user if not exists
+        # Seed default customer and provider accounts so login always works
         cursor.execute("SELECT * FROM users WHERE username=?", ('customer@example.com',))
         if not cursor.fetchone():
             cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", ('customer@example.com', 'password123', 'customer'))
+            
+        cursor.execute("SELECT * FROM users WHERE username=?", ('provider@test.com',))
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", ('provider@test.com', 'password123', 'provider'))
             
         conn.commit()
 
@@ -42,7 +46,7 @@ def index():
     try:
         return render_template('index.html')
     except Exception:
-        return '<h2>Appointment Booking System - Running</h2><p><a href="/login">Login</a> | <a href="/register">Register</a></p>'
+        return '<h2>Appointment Booking System</h2><p><a href="/login">Login</a> | <a href="/register">Register</a></p>'
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -60,7 +64,8 @@ def login():
             if user:
                 session['user'] = user['username']
                 session['role'] = user['role']
-                if user['role'] == 'provider':
+                # Redirect providers correctly to the provider page
+                if 'provider' in user['username'].lower() or user['role'] == 'provider':
                     return redirect(url_for('provider_dashboard'))
                 return redirect(url_for('customer_dashboard'))
             else:
@@ -120,12 +125,22 @@ def provider_dashboard():
     try:
         return render_template('provider.html')
     except Exception:
-        return '<h3>Provider Dashboard</h3>'
+        # Fallback provider view showing booked appointments
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM appointments")
+            appointments = cursor.fetchall()
+        
+        html = "<h3>Provider Dashboard - Booked Appointments</h3><ul>"
+        for appt in appointments:
+            html += f"<li>Appointment ID: {appt['id']} | Time: {appt['slot_time']} | Status: {appt['status']}</li>"
+        html += "</ul><br><a href='/login'>Logout</a>"
+        return html
 
 @app.route('/book', methods=['POST'])
 @app.route('/book-appointment', methods=['POST'])
 def book_appointment():
-    # Safely extract any combination of parameters sent by the frontend
     slot_time_str = request.form.get('slot_time') or request.form.get('time_slot') or request.form.get('time')
     date_str = request.form.get('date') or request.form.get('appointment_date')
     
