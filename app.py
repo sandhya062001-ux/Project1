@@ -1,21 +1,35 @@
 import os
+import sqlite3
 from flask import Flask, render_template, request, redirect, url_for, session
-import pymysql
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'your_default_secret_key')
+app.secret_key = 'super-secret-key'
+DB_FILE = 'database.db'
 
-# Database connection using environment variables (Render compatible)
+def init_db():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL
+        )
+    ''')
+    # Insert default test user if missing
+    cursor.execute("SELECT * FROM users WHERE username='customer'")
+    if not cursor.fetchone():
+        cursor.execute("INSERT INTO users (username, password) VALUES ('customer', 'password123')")
+    conn.commit()
+    conn.close()
+
+# Initialize database table on start
+init_db()
+
 def get_db_connection():
-    connection = pymysql.connect(
-        host=os.environ.get('DB_HOST', 'localhost'),
-        user=os.environ.get('DB_USER', 'root'),
-        password=os.environ.get('DB_PASSWORD', ''),
-        database=os.environ.get('DB_NAME', 'appointment_booking'),
-        port=int(os.environ.get('DB_PORT', 3306)),
-        cursorclass=pymysql.cursors.DictCursor
-    )
-    return connection
+    conn = sqlite3.connect(DB_FILE)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 @app.route('/')
 def index():
@@ -29,11 +43,9 @@ def login():
         
         try:
             conn = get_db_connection()
-            with conn.cursor() as cursor:
-                # Adjust table/column names if they differ in your database
-                sql = "SELECT * FROM users WHERE username = %s AND password = %s"
-                cursor.execute(sql, (username, password))
-                user = cursor.fetchone()
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
+            user = cursor.fetchone()
             conn.close()
             
             if user:
