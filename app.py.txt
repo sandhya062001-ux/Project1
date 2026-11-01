@@ -1,0 +1,31 @@
+from flask import Flask, render_template, request, redirect, url_for
+import pymysql
+
+app = Flask(__name__)
+
+# Database Connection Helper
+def get_db_connection():
+    connection = pymysql.connect(
+        host='localhost',
+        user='root',
+        password='root1234',
+        database='appointment_db',
+        cursorclass=pymysql.cursors.DictCursor
+    )
+    return connection
+
+# Routes to load your HTML pages
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/customer')
+def customer():
+    return render_template('customer.html')
+
+@app.route('/provider')
+def provider():
+    return render_template('provider.html')
+
+if __name__ == '__main__':
+    app.run(debug=True)

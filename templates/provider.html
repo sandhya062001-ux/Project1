@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Provider Dashboard</title>
+    <!-- Bootstrap 5 CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-success shadow-sm">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="#">Service Provider Dashboard</a>
+            <a href="/" class="btn btn-outline-light btn-sm">Logout</a>
+        </div>
+    </nav>
+
+    <div class="container mt-5">
+        <div class="card shadow">
+            <div class="card-header bg-white py-3">
+                <h4 class="mb-0 text-success fw-bold">Incoming Appointments</h4>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover align-middle">
+                        <thead class="table-success">
+                            <tr>
+                                <th>ID</th>
+                                <th>Customer Email</th>
+                                <th>Provider Name</th>
+                                <th>Date</th>
+                                <th>Time Slot</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% if appointments %}
+                                {% for appt in appointments %}
+                                <tr>
+                                    <td>{{ appt.id }}</td>
+                                    <td>{{ appt.customer_email }}</td>
+                                    <td>{{ appt.provider_name }}</td>
+                                    <td>{{ appt.appointment_date }}</td>
+                                    <td><span class="badge bg-primary">{{ appt.slot }}</span></td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr>
+                                    <td colspan="5" class="text-center text-muted py-4">No appointments booked yet.</td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
