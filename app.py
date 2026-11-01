@@ -33,58 +33,66 @@ init_db()
 
 @app.route('/')
 def index():
-    return '''
-        <h2>Appointment Booking System</h2>
-        <p><b>Quick Access Links:</b></p>
-        <ul>
-            <li><a href="/customer">Go to Customer Dashboard (Book Appointments)</a></li>
-            <li><a href="/provider">Go to Provider Dashboard (View Bookings)</a></li>
-            <li><a href="/login">Login Page</a></li>
-            <li><a href="/register">Register Page</a></li>
-        </ul>
-    '''
+    return render_template('index.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        return redirect(url_for('customer_dashboard'))
-    return '''
-        <h3>Login</h3>
-        <form method="POST">
-            Username / Email: <input type="text" name="username" required><br><br>
-            Password: <input type="password" name="password" required><br><br>
-            <input type="submit" value="Login">
-        </form>
-        <br><a href="/customer">Skip to Customer Dashboard</a> | <a href="/provider">Skip to Provider Dashboard</a>
-    '''
+        username = request.form.get('username') or request.form.get('email')
+        password = request.form.get('password')
+        
+        try:
+            with sqlite3.connect(DB_FILE, timeout=30) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM users WHERE username = ? AND password = ?", (username, password))
+                user = cursor.fetchone()
+            
+            if user:
+                session['user'] = user['username']
+                session['role'] = user['role']
+                if 'provider' in user['username'].lower() or user['role'] == 'provider':
+                    return redirect(url_for('provider_dashboard'))
+                return redirect(url_for('customer_dashboard'))
+            else:
+                return "Invalid Username or Password", 401
+        except Exception as e:
+            return f"Database Error: {str(e)}", 500
+            
+    # If a login template exists, render it; otherwise, redirect to index or show basic form
+    try:
+        return render_template('login.html')
+    except Exception:
+        return render_template('index.html')
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        return redirect(url_for('login'))
-    return '''
-        <h3>Register</h3>
-        <form method="POST">
-            Username / Email: <input type="text" name="username" required><br><br>
-            Password: <input type="password" name="password" required><br><br>
-            <input type="submit" value="Register">
-        </form>
-        <br><a href="/login">Back to Login</a>
-    '''
+        username = request.form.get('username') or request.form.get('email')
+        password = request.form.get('password')
+        
+        if not username or not password:
+            return "Username and password are required", 400
+        
+        try:
+            with sqlite3.connect(DB_FILE, timeout=30) as conn:
+                cursor = conn.cursor()
+                cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, 'customer')", (username, password))
+                conn.commit()
+            return redirect(url_for('login'))
+        except sqlite3.IntegrityError:
+            return "Registration Error: Username already exists.", 400
+        except Exception as e:
+            return f"Registration Error: {str(e)}", 500
+            
+    try:
+        return render_template('register.html')
+    except Exception:
+        return render_template('index.html')
 
 @app.route('/customer')
 def customer_dashboard():
-    try:
-        return render_template('customer.html')
-    except Exception:
-        return '''
-            <h3>Customer Dashboard</h3>
-            <form action="/book" method="POST">
-                Slot Time (YYYY-MM-DD HH:MM:SS): <input type="text" name="slot_time" value="2026-11-05 10:00:00"><br><br>
-                <input type="submit" value="Book Appointment">
-            </form>
-            <br><a href="/provider">View Provider Dashboard</a>
-        '''
+    return render_template('customer.html')
 
 @app.route('/provider')
 def provider_dashboard():
@@ -94,17 +102,9 @@ def provider_dashboard():
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM appointments")
             appointments = cursor.fetchall()
-        
-        html = "<h2>Provider Dashboard - Booked Appointments</h2>"
-        html += "<p><a href='/customer'>← Back to Customer Dashboard</a></p><hr><ul>"
-        if not appointments:
-            html += "<li>No appointments booked yet.</li>"
-        for appt in appointments:
-            html += f"<li><b>Appointment ID:</b> {appt['id']} | <b>Slot Time:</b> {appt['slot_time']} | <b>Status:</b> {appt['status']}</li>"
-        html += "</ul>"
-        return html
-    except Exception as e:
-        return f"Error loading provider dashboard: {str(e)}"
+        return render_template('provider.html', appointments=appointments)
+    except Exception:
+        return render_template('provider.html')
 
 @app.route('/book', methods=['POST'])
 @app.route('/book-appointment', methods=['POST'])
