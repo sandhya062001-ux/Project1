@@ -1,0 +1,100 @@
+{
+  "info": {
+    "name": "Appointment Booking System API",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Register User",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {"key": "username", "value": "newuser@test.com", "type": "text"},
+            {"key": "password", "value": "password123", "type": "text"}
+          ]
+        },
+        "url": {
+          "raw": "https://appointment-booking-system-8nbr.onrender.com/register",
+          "host": ["appointment-booking-system-8nbr", "onrender", "com"],
+          "path": ["register"]
+        }
+      }
+    },
+    {
+      "name": "Login User",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {"key": "username", "value": "customer@example.com", "type": "text"},
+            {"key": "password", "value": "password123", "type": "text"}
+          ]
+        },
+        "url": {
+          "raw": "https://appointment-booking-system-8nbr.onrender.com/login",
+          "host": ["appointment-booking-system-8nbr", "onrender", "com"],
+          "path": ["login"]
+        }
+      }
+    },
+    {
+      "name": "Book Valid Slot",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {"key": "slot_time", "value": "2026-11-28 10:00:00", "type": "text"}
+          ]
+        },
+        "url": {
+          "raw": "https://appointment-booking-system-8nbr.onrender.com/book",
+          "host": ["appointment-booking-system-8nbr", "onrender", "com"],
+          "path": ["book"]
+        }
+      }
+    },
+    {
+      "name": "Book Duplicate Slot (Expect 409 Conflict)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {"key": "slot_time", "value": "2026-11-28 10:00:00", "type": "text"}
+          ]
+        },
+        "url": {
+          "raw": "https://appointment-booking-system-8nbr.onrender.com/book",
+          "host": ["appointment-booking-system-8nbr", "onrender", "com"],
+          "path": ["book"]
+        }
+      }
+    },
+    {
+      "name": "Book Past Slot (Expect 400 Bad Request)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/x-www-form-urlencoded" }],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {"key": "slot_time", "value": "2020-01-01 10:00:00", "type": "text"}
+          ]
+        },
+        "url": {
+          "raw": "https://appointment-booking-system-8nbr.onrender.com/book",
+          "host": ["appointment-booking-system-8nbr", "onrender", "com"],
+          "path": ["book"]
+        }
+      }
+    }
+  ]
+}
