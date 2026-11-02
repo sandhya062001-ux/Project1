@@ -142,6 +142,7 @@ BASE_LAYOUT = '''
         th { background: #0066cc; color: white; }
         .error { color: red; margin-bottom: 15px; font-weight: bold; }
         .success { color: green; margin-bottom: 15px; font-weight: bold; }
+        .nav-links { margin-bottom: 20px; }
     </style>
 </head>
 <body>
@@ -154,12 +155,60 @@ BASE_LAYOUT = '''
 
 INDEX_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
     <h1>Appointment Booking System</h1>
-    <p>Welcome! Please choose a dashboard below:</p>
+    <p>Welcome! Please choose a section below:</p>
     <p>
         <a href="/customer" class="btn">Customer Dashboard</a>   
         <a href="/provider" class="btn">Provider Dashboard</a>   
-        <a href="/login-page" class="btn" style="background:#666;">Login / Register</a>
+        <a href="/login-page" class="btn" style="background:#28a745;">Login / Register</a>
     </p>
+''')
+
+AUTH_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
+    <div class="nav-links">
+        <a href="/" class="btn" style="background:#666; padding: 5px 15px; font-size: 13px;">← Back to Home</a>
+    </div>
+    <div style="display: flex; gap: 40px;">
+        <div style="flex: 1; border-right: 1px solid #ddd; padding-right: 20px;">
+            <h2>Login</h2>
+            {% if error %}<div class="error">{{ error }}</div>{% endif %}
+            <form method="POST" action="/auth/login">
+                <div class="form-group">
+                    <label>Email Address</label>
+                    <input type="email" name="email" value="customer@test.com" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" value="password123" required>
+                </div>
+                <button type="submit" class="btn">Login</button>
+            </form>
+        </div>
+        <div style="flex: 1;">
+            <h2>Register</h2>
+            <form method="POST" action="/auth/register">
+                <div class="form-group">
+                    <label>Full Name</label>
+                    <input type="text" name="name" required placeholder="John Doe">
+                </div>
+                <div class="form-group">
+                    <label>Email Address</label>
+                    <input type="email" name="email" required placeholder="john@example.com">
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" required>
+                </div>
+                <div class="form-group">
+                    <label>Role</label>
+                    <select name="role">
+                        <option value="customer">Customer</option>
+                        <option value="provider">Provider</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn" style="background: #28a745;">Register Account</button>
+            </form>
+        </div>
+    </div>
 ''')
 
 CUSTOMER_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
@@ -267,7 +316,7 @@ def index():
 
 @app.route('/login-page')
 def login_page():
-    return render_template_string(BASE_LAYOUT.replace('{% block content %}{% endblock %}', '<h2>Login</h2><form method="POST" action="/auth/login"><div class="form-group"><label>Email</label><input type="email" name="email" value="customer@test.com" required></div><div class="form-group"><label>Password</label><input type="password" name="password" value="password123" required></div><button type="submit" class="btn">Login</button></form><p><a href="/">Home</a></p>'))
+    return render_template_string(AUTH_HTML)
 
 @app.route('/customer')
 def customer_dashboard():
@@ -296,7 +345,26 @@ def login():
         user = conn.cursor().execute("SELECT * FROM users WHERE email = ? AND password_hash = ?", (email, password)).fetchone()
     if user and user['role'] == 'provider':
         return redirect('/provider')
-    return redirect('/customer')
+    elif user:
+        return redirect('/customer')
+    return render_template_string(AUTH_HTML, error="Invalid email or password")
+
+@app.route('/auth/register', methods=['POST'])
+def register():
+    name = request.form.get('name')
+    email = request.form.get('email')
+    password = request.form.get('password')
+    role = request.form.get('role', 'customer')
+    try:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)", (name, email, password, role))
+            if role == 'provider':
+                cursor.execute("INSERT INTO providers (user_id, category, bio) VALUES (?, 'General', '')", (cursor.lastrowid,))
+            conn.commit()
+        return redirect('/login-page')
+    except Exception as e:
+        return render_template_string(AUTH_HTML, error=f"Registration failed: Email may already exist.")
 
 @app.route('/appointments', methods=['POST'])
 def create_appointment():
