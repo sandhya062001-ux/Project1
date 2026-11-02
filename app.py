@@ -15,6 +15,13 @@ def get_db():
     return conn
 
 def init_db():
+    # Cleanly remove old database to avoid schema column mismatch issues on boot
+    if os.path.exists(DB_FILE):
+        try:
+            os.remove(DB_FILE)
+        except Exception:
+            pass
+
     with get_db() as conn:
         cursor = conn.cursor()
         
@@ -80,7 +87,7 @@ def init_db():
             WHERE status = 'booked'
         ''')
         
-        # Additional performance indexes
+        # Performance indexes
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_appointments_customer ON appointments(customer_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_appointments_provider ON appointments(provider_id, start_time)')
 
@@ -111,24 +118,18 @@ def init_db():
         ]
         
         for name, email, category, bio in seed_providers:
-            cursor.execute("SELECT id FROM users WHERE email = ?", (email,))
-            row = cursor.fetchone()
-            if not row:
-                pw_hash = generate_password_hash("password123")
-                cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'provider')", (name, email, pw_hash))
-                user_id = cursor.lastrowid
-                cursor.execute("INSERT INTO providers (user_id, category, bio, slot_minutes) VALUES (?, ?, ?, 30)", (user_id, category, bio))
-                
-                # Default availability for all seed providers (Monday to Friday, 09:00 to 17:00)
-                days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
-                for day in days:
-                    cursor.execute("INSERT INTO availability (provider_id, day_of_week, start_time, end_time) VALUES (?, ?, '09:00', '17:00')", (cursor.lastrowid, day))
+            pw_hash = generate_password_hash("password123")
+            cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'provider')", (name, email, pw_hash))
+            user_id = cursor.lastrowid
+            cursor.execute("INSERT INTO providers (user_id, category, bio, slot_minutes) VALUES (?, ?, ?, 30)", (user_id, category, bio))
+            prov_id = cursor.lastrowid
+            
+            for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']:
+                cursor.execute("INSERT INTO availability (provider_id, day_of_week, start_time, end_time) VALUES (?, ?, '09:00', '17:00')", (prov_id, day))
 
         # Seed Test Customer
-        cursor.execute("SELECT id FROM users WHERE email = ?", ("customer@test.com",))
-        if not cursor.fetchone():
-            pw_hash = generate_password_hash("password123")
-            cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES ('Test Customer', 'customer@test.com', ?, 'customer')", (pw_hash,))
+        pw_hash = generate_password_hash("password123")
+        cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES ('Test Customer', 'customer@test.com', ?, 'customer')", (pw_hash,))
 
         conn.commit()
 
@@ -240,13 +241,12 @@ def get_provider_slots(id):
 
     with get_db() as conn:
         cursor = conn.cursor()
-        provider = cursor.cursor().execute("SELECT * FROM providers WHERE id = ?", (id,)).fetchone() if hasattr(cursor, 'cursor') else cursor.execute("SELECT * FROM providers WHERE id = ?", (id,)).fetchone()
+        provider = cursor.execute("SELECT * FROM providers WHERE id = ?", (id,)).fetchone()
         if not provider:
             return jsonify({"error": "Provider not found"}), 404
 
         avail = cursor.execute("SELECT * FROM availability WHERE provider_id = ? AND day_of_week = ?", (id, day_name)).fetchall()
         
-        # Fetch already booked/active slots for this provider on this date
         start_day_str = f"{date_str} 00:00:00"
         end_day_str = f"{date_str} 23:59:59"
         booked = cursor.execute('''
@@ -290,7 +290,6 @@ def update_availability():
         if not p: return jsonify({"error": "Provider profile not found"}), 404
         provider_id = p['id']
 
-        # Expecting JSON list of availability rules: e.g., [{"day_of_week": "Monday", "start_time": "09:00", "end_time": "17:00"}, ...]
         rules = data.get('availability', [])
         cursor.execute("DELETE FROM availability WHERE provider_id = ?", (provider_id,))
         for r in rules:
@@ -309,7 +308,7 @@ def create_appointment():
     data = request.get_json() or request.form
     customer_id = session['user_id']
     provider_id = data.get('provider_id')
-    start_time_str = data.get('start_time') # Format: 'YYYY-MM-DD HH:MM:SS'
+    start_time_str = data.get('start_time')
     notes = data.get('notes', '')
 
     if not provider_id or not start_time_str:
@@ -329,7 +328,7 @@ def create_appointment():
     with get_db() as conn:
         cursor = conn.cursor()
         
-        # Check monthly booking limit rule for customer (max 1 appointment per calendar month)
+        # Monthly limit rule check for customer
         year_month = start_dt.strftime('%Y-%m')
         existing_month_appt = cursor.execute('''
             SELECT id FROM appointments 
@@ -339,7 +338,6 @@ def create_appointment():
         if existing_month_appt:
             return jsonify({"error": "Monthly limit reached: You already have an active booking this month."}), 400
 
-        # Get slot duration from provider profile
         p = cursor.execute("SELECT slot_minutes FROM providers WHERE id = ?", (provider_id,)).fetchone()
         if not p: return jsonify({"error": "Provider not found"}), 404
         slot_minutes = p['slot_minutes'] or 30
@@ -347,7 +345,6 @@ def create_appointment():
         end_dt = start_dt + timedelta(minutes=slot_minutes)
         end_time_str = end_dt.strftime('%Y-%m-%d %H:%M:%S')
 
-        # Auto-generate unique booking reference e.g., APT-2026-000123
         rand_num = random.randint(100000, 999999)
         booking_ref = f"APT-{start_dt.year}-{rand_num}"
 
@@ -359,7 +356,6 @@ def create_appointment():
             
             appt_id = cursor.lastrowid
             
-            # Record status history
             cursor.execute('''
                 INSERT INTO appointment_history (appointment_id, old_status, new_status, changed_by, reason)
                 VALUES (?, NULL, 'booked', ?, 'Initial booking created')
@@ -367,7 +363,6 @@ def create_appointment():
             
             conn.commit()
         except sqlite3.IntegrityError:
-            # Enforces 409 Conflict as mandated in assignment requirements
             return jsonify({"error": "Conflict: This time slot is already booked."}), 409
 
     return jsonify({
@@ -428,7 +423,6 @@ def cancel_appointment(id):
         if not appt:
             return jsonify({"error": "Appointment not found"}), 404
 
-        # Ownership or authorization check
         is_owner = (appt['customer_id'] == user_id)
         is_provider = False
         if role == 'provider':
@@ -444,7 +438,6 @@ def cancel_appointment(id):
 
         start_dt = datetime.strptime(appt['start_time'], '%Y-%m-%d %H:%M:%S')
         
-        # Rule: cancel or reschedule only up to 2 hours before start time (applies to customer)
         if is_owner and not is_provider:
             if datetime.now() + timedelta(hours=2) > start_dt:
                 return jsonify({"error": "Cancellations are only permitted up to 2 hours before the start time."}), 400
@@ -607,13 +600,11 @@ def provider_dashboard_summary():
         if not p: return jsonify({"error": "Provider not found"}), 404
         provider_id = p['id']
 
-        # Today's schedule count
         today_count = cursor.execute('''
             SELECT COUNT(*) as count FROM appointments 
             WHERE provider_id = ? AND start_time LIKE ? AND status = 'booked'
         ''', (provider_id, f"{today_str}%")).fetchone()['count']
 
-        # Counts by status
         status_counts = cursor.execute('''
             SELECT status, COUNT(*) as count FROM appointments 
             WHERE provider_id = ? GROUP BY status
@@ -621,7 +612,6 @@ def provider_dashboard_summary():
         
         counts_dict = {row['status']: row['count'] for row in status_counts}
 
-        # Busiest days using SQL GROUP BY
         busiest_days = cursor.execute('''
             SELECT substr(start_time, 1, 10) as date, COUNT(*) as bookings_count 
             FROM appointments 
