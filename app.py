@@ -130,10 +130,12 @@ BASE_LAYOUT = '''
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { font-family: Arial, sans-serif; background: #f4f6f9; margin: 0; padding: 20px; }
-        .container { max-width: 850px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .container { max-width: 900px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         h1, h2, h3 { color: #0066cc; }
-        .btn { background: #0066cc; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; }
+        .btn { background: #0066cc; color: white; padding: 8px 15px; border: none; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; font-size: 14px; }
         .btn:hover { background: #004fb3; }
+        .btn-danger { background: #dc3545; }
+        .btn-danger:hover { background: #bd2130; }
         .form-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-weight: bold; }
         input, select, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
@@ -239,6 +241,23 @@ CUSTOMER_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
         <button type="submit" class="btn">Confirm Booking</button>
     </form>
 
+    <hr style="margin: 30px 0;">
+    <h3>My Appointments (Cancel / Reschedule)</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Ref</th>
+                <th>Provider ID</th>
+                <th>Start Time</th>
+                <th>Status</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody id="myApptsTable">
+            <tr><td colspan="5">Loading appointments...</td></tr>
+        </tbody>
+    </table>
+
     <script>
     async function fetchSlots() {
         const providerId = document.getElementById('provider_id').value;
@@ -264,6 +283,48 @@ CUSTOMER_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
         }
     }
 
+    async function loadMyAppointments() {
+        const res = await fetch('/appointments/mine');
+        const appts = await res.json();
+        const tbody = document.getElementById('myApptsTable');
+        tbody.innerHTML = '';
+        if(appts.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5">No booked appointments found.</td></tr>';
+            return;
+        }
+        appts.forEach(a => {
+            let actions = '';
+            if(a.status === 'booked') {
+                actions = `<button class="btn btn-danger" onclick="cancelAppt(${a.id})">Cancel</button>`;
+            } else {
+                actions = `<span>-</span>`;
+            }
+            tbody.innerHTML += `<tr>
+                <td>${a.booking_ref}</td>
+                <td>${a.provider_id}</td>
+                <td>${a.start_time}</td>
+                <td><b>${a.status}</b></td>
+                <td>${actions}</td>
+            </tr>`;
+        });
+    }
+
+    async function cancelAppt(id) {
+        if(!confirm("Are you sure you want to cancel this appointment?")) return;
+        const res = await fetch(`/appointments/${id}/cancel`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({reason: 'Customer requested cancellation'})
+        });
+        const data = await res.json();
+        if(res.ok) {
+            alert("Appointment cancelled successfully!");
+            loadMyAppointments();
+        } else {
+            alert("Error: " + data.error);
+        }
+    }
+
     async function bookAppointment(e) {
         e.preventDefault();
         const provider_id = document.getElementById('provider_id').value;
@@ -284,12 +345,15 @@ CUSTOMER_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
         if(res.ok) {
             resDiv.className = 'success';
             resDiv.innerText = "Appointment booked successfully! Reference: " + data.booking_ref;
-            fetchSlots(); // Refresh slots
+            fetchSlots();
+            loadMyAppointments();
         } else {
             resDiv.className = 'error';
             resDiv.innerText = "Booking Error: " + data.error;
         }
     }
+
+    window.onload = loadMyAppointments;
     </script>
 ''')
 
@@ -415,6 +479,41 @@ def get_provider_slots(id):
             curr += timedelta(minutes=slot_minutes)
 
     return jsonify({"provider_id": id, "date": date_str, "slots": available_slots}), 200
+
+@app.route('/appointments/mine', methods=['GET'])
+def get_my_appointments():
+    customer_id = 1 # Test customer ID
+    with get_db() as conn:
+        appts = conn.cursor().execute("SELECT * FROM appointments WHERE customer_id = ? ORDER BY start_time DESC", (customer_id,)).fetchall()
+    return jsonify([dict(a) for a in appts]), 200
+
+@app.route('/appointments/<int:id>/cancel', methods=['PATCH'])
+def cancel_appointment(id):
+    customer_id = 1
+    data = request.get_json() or request.form
+    reason = data.get('reason', 'Cancelled by customer')
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        appt = cursor.execute("SELECT * FROM appointments WHERE id = ? AND customer_id = ?", (id, customer_id)).fetchone()
+        if not appt:
+            return jsonify({"error": "Appointment not found"}), 404
+
+        if appt['status'] != 'booked':
+            return jsonify({"error": "Appointment is already cancelled or completed"}), 400
+
+        start_dt = datetime.strptime(appt['start_time'], '%Y-%m-%d %H:%M:%S')
+        if datetime.now() + timedelta(hours=2) > start_dt:
+            return jsonify({"error": "Cancellations are only permitted up to 2 hours before start time."}), 400
+
+        cursor.execute("UPDATE appointments SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ?", (id,))
+        cursor.execute('''
+            INSERT INTO appointment_history (appointment_id, old_status, new_status, changed_by, reason)
+            VALUES (?, 'booked', 'cancelled', ?, ?)
+        ''', (id, customer_id, reason))
+        conn.commit()
+
+    return jsonify({"message": "Appointment cancelled successfully"}), 200
 
 @app.route('/provider/appointments-json')
 def provider_appointments_json():
