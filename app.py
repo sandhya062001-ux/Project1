@@ -220,25 +220,60 @@ CUSTOMER_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
     <form id="bookingForm" onsubmit="bookAppointment(event)">
         <div class="form-group">
             <label>Select Service Provider</label>
-            <select id="provider_id" required>
+            <select id="provider_id" onchange="fetchSlots()" required>
                 {% for p in providers %}
                 <option value="{{ p.id }}">{{ p.name }} ({{ p.category }})</option>
                 {% endfor %}
             </select>
         </div>
         <div class="form-group">
-            <label>Start Time (Format: YYYY-MM-DD HH:MM:SS)</label>
-            <input type="text" id="start_time" placeholder="2026-11-15 10:00:00" required>
+            <label>Select Date</label>
+            <input type="date" id="date" onchange="fetchSlots()" required>
+        </div>
+        <div class="form-group">
+            <label>Available Time Slots</label>
+            <select id="slot_select" required>
+                <option value="">-- Choose a date first --</option>
+            </select>
         </div>
         <button type="submit" class="btn">Confirm Booking</button>
     </form>
 
     <script>
+    async function fetchSlots() {
+        const providerId = document.getElementById('provider_id').value;
+        const dateStr = document.getElementById('date').value;
+        const slotSelect = document.getElementById('slot_select');
+        
+        if(!providerId || !dateStr) return;
+
+        slotSelect.innerHTML = '<option value="">Loading available slots...</option>';
+        const res = await fetch(`/providers/${providerId}/slots?date=${dateStr}`);
+        const data = await res.json();
+        
+        slotSelect.innerHTML = '';
+        if(data.slots && data.slots.length > 0) {
+            data.slots.forEach(slot => {
+                const opt = document.createElement('option');
+                opt.value = slot.start_time;
+                opt.innerText = slot.start_time.split(' ')[1] + ' to ' + slot.end_time.split(' ')[1];
+                slotSelect.appendChild(opt);
+            });
+        } else {
+            slotSelect.innerHTML = '<option value="">No available slots for this date</option>';
+        }
+    }
+
     async function bookAppointment(e) {
         e.preventDefault();
         const provider_id = document.getElementById('provider_id').value;
-        const start_time = document.getElementById('start_time').value;
+        const start_time = document.getElementById('slot_select').value;
         
+        if(!start_time) {
+            alert('Please select a valid time slot.');
+            return;
+        }
+
         const res = await fetch('/appointments', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -249,6 +284,7 @@ CUSTOMER_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
         if(res.ok) {
             resDiv.className = 'success';
             resDiv.innerText = "Appointment booked successfully! Reference: " + data.booking_ref;
+            fetchSlots(); // Refresh slots
         } else {
             resDiv.className = 'error';
             resDiv.innerText = "Booking Error: " + data.error;
@@ -330,6 +366,56 @@ def provider_dashboard():
         providers = conn.cursor().execute("SELECT p.id, u.name, p.category FROM providers p JOIN users u ON p.user_id = u.id").fetchall()
     return render_template_string(PROVIDER_HTML, providers=providers)
 
+@app.route('/providers/<int:id>/slots', methods=['GET'])
+def get_provider_slots(id):
+    date_str = request.args.get('date')
+    if not date_str:
+        return jsonify({"error": "Date required"}), 400
+
+    try:
+        target_date = datetime.strptime(date_str, '%Y-%m-%d')
+    except ValueError:
+        return jsonify({"error": "Invalid date format"}), 400
+
+    day_name = target_date.strftime('%A')
+
+    with get_db() as conn:
+        cursor = conn.cursor()
+        provider = cursor.execute("SELECT * FROM providers WHERE id = ?", (id,)).fetchone()
+        if not provider:
+            return jsonify({"error": "Provider not found"}), 404
+
+        avail = cursor.execute("SELECT * FROM availability WHERE provider_id = ? AND day_of_week = ?", (id, day_name)).fetchall()
+        
+        start_day_str = f"{date_str} 00:00:00"
+        end_day_str = f"{date_str} 23:59:59"
+        booked = cursor.execute('''
+            SELECT start_time FROM appointments 
+            WHERE provider_id = ? AND status = 'booked' AND start_time BETWEEN ? AND ?
+        ''', (id, start_day_str, end_day_str)).fetchall()
+        booked_times = {row['start_time'] for row in booked}
+
+    slot_minutes = provider['slot_minutes'] or 30
+    available_slots = []
+
+    for a in avail:
+        t_start = datetime.strptime(f"{date_str} {a['start_time']}", '%Y-%m-%d %H:%M')
+        t_end = datetime.strptime(f"{date_str} {a['end_time']}", '%Y-%m-%d %H:%M')
+        
+        curr = t_start
+        while curr + timedelta(minutes=slot_minutes) <= t_end:
+            slot_start_str = curr.strftime('%Y-%m-%d %H:%M:%S')
+            slot_end_str = (curr + timedelta(minutes=slot_minutes)).strftime('%Y-%m-%d %H:%M:%S')
+            
+            if slot_start_str not in booked_times and curr > datetime.now():
+                available_slots.append({
+                    "start_time": slot_start_str,
+                    "end_time": slot_end_str
+                })
+            curr += timedelta(minutes=slot_minutes)
+
+    return jsonify({"provider_id": id, "date": date_str, "slots": available_slots}), 200
+
 @app.route('/provider/appointments-json')
 def provider_appointments_json():
     provider_id = request.args.get('provider_id')
@@ -376,7 +462,7 @@ def create_appointment():
     try:
         start_dt = datetime.strptime(start_time_str, '%Y-%m-%d %H:%M:%S')
     except ValueError:
-        return jsonify({"error": "Invalid format. Use YYYY-MM-DD HH:MM:SS"}), 400
+        return jsonify({"error": "Invalid format."}), 400
 
     now = datetime.now()
     if start_dt < now:
