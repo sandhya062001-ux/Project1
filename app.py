@@ -2,7 +2,7 @@ import os
 import sqlite3
 import random
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify, session, render_template_string
+from flask import Flask, request, jsonify, session, render_template_string, redirect
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'appointment-system-super-secret-key')
@@ -60,7 +60,7 @@ def init_db():
             )
         ''')
         
-        # 4. Appointments table with Unique Index for 409 Conflict double-booking protection
+        # 4. Appointments table with Unique Index for 409 Conflict protection
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS appointments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,8 +114,7 @@ def init_db():
         ]
         
         for name, email, category, bio in seed_providers:
-            pw_hash = "hashed_password123" # simplified for seeding
-            cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, 'provider')", (name, email, pw_hash))
+            cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, 'password123', 'provider')", (name, email))
             user_id = cursor.lastrowid
             cursor.execute("INSERT INTO providers (user_id, category, bio, slot_minutes) VALUES (?, ?, ?, 30)", (user_id, category, bio))
             prov_id = cursor.lastrowid
@@ -124,7 +123,7 @@ def init_db():
                 cursor.execute("INSERT INTO availability (provider_id, day_of_week, start_time, end_time) VALUES (?, ?, '09:00', '17:00')", (prov_id, day))
 
         # Seed Customer
-        cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES ('Test Customer', 'customer@test.com', 'hashed_password123', 'customer')")
+        cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES ('Test Customer', 'customer@test.com', 'password123', 'customer')")
         conn.commit()
 
 init_db()
@@ -145,11 +144,8 @@ BASE_LAYOUT = '''
         .form-group { margin-bottom: 15px; }
         label { display: block; margin-bottom: 5px; font-weight: bold; }
         input, select, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-        th { background: #0066cc; color: white; }
-        .error { color: red; margin-bottom: 15px; }
-        .success { color: green; margin-bottom: 15px; }
+        .error { color: red; margin-bottom: 15px; font-weight: bold; }
+        .success { color: green; margin-bottom: 15px; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -163,12 +159,7 @@ BASE_LAYOUT = '''
 INDEX_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
     <h1>Appointment Booking System</h1>
     <p>Welcome! Please choose an option below:</p>
-    <ul>
-        <li><a href="/login-page">Login Page</a></li>
-        <li><a href="/register-page">Register Page</a></li>
-        <li><a href="/customer">Customer Dashboard</a></li>
-        <li><a href="/provider">Provider Dashboard</a></li>
-    </ul>
+    <p><a href="/login-page" class="btn">Go to Login</a>   <a href="/register-page" class="btn">Register</a></p>
 ''')
 
 LOGIN_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
@@ -185,14 +176,15 @@ LOGIN_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
         </div>
         <button type="submit" class="btn">Login</button>
     </form>
-    <p>Don't have an account? <a href="/register-page">Register here</a></p>
+    <p><br>Don't have an account? <a href="/register-page">Register here</a> | <a href="/">Home</a></p>
 ''')
 
 CUSTOMER_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
     <h2>Customer Dashboard</h2>
-    <p>Welcome, Customer! (<a href="/">Home</a>)</p>
+    <p>Welcome, Customer! (<a href="/">Logout / Home</a>)</p>
     <hr>
     <h3>Book an Appointment</h3>
+    <div id="result"></div>
     <form id="bookingForm" onsubmit="bookAppointment(event)">
         <div class="form-group">
             <label>Select Service Provider</label>
@@ -203,16 +195,11 @@ CUSTOMER_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
             </select>
         </div>
         <div class="form-group">
-            <label>Appointment Date</label>
-            <input type="date" id="date" required>
-        </div>
-        <div class="form-group">
-            <label>Start Time (YYYY-MM-DD HH:MM:SS)</label>
-            <input type="text" id="start_time" placeholder="2026-11-10 10:00:00" required>
+            <label>Start Time (Format: YYYY-MM-DD HH:MM:SS)</label>
+            <input type="text" id="start_time" placeholder="2026-11-15 10:00:00" required>
         </div>
         <button type="submit" class="btn">Confirm Booking</button>
     </form>
-    <div id="result" style="margin-top:15px; font-weight:bold;"></div>
 
     <script>
     async function bookAppointment(e) {
@@ -229,10 +216,10 @@ CUSTOMER_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
         const resDiv = document.getElementById('result');
         if(res.ok) {
             resDiv.className = 'success';
-            resDiv.innerText = "Success! Ref: " + data.booking_ref;
+            resDiv.innerText = "Appointment booked successfully! Reference: " + data.booking_ref;
         } else {
             resDiv.className = 'error';
-            resDiv.innerText = "Error: " + data.error;
+            resDiv.innerText = "Booking Error: " + data.error;
         }
     }
     </script>
@@ -240,12 +227,12 @@ CUSTOMER_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
 
 PROVIDER_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
     <h2>Provider Dashboard</h2>
-    <p>Welcome Provider! (<a href="/">Home</a>)</p>
+    <p>Welcome Provider! (<a href="/">Logout / Home</a>)</p>
     <hr>
-    <h3>Set Weekly Availability</h3>
-    <form method="POST" action="/provider/availability-ui">
+    <h3>Set Weekly Availability & Working Hours</h3>
+    <form method="POST" action="/provider/availability">
         <div class="form-group">
-            <label>Working Hours (Start - End)</label>
+            <label>Start Time & End Time</label>
             <input type="text" name="start_time" value="09:00" style="width:48%; display:inline-block;"> to 
             <input type="text" name="end_time" value="17:00" style="width:48%; display:inline-block;">
         </div>
@@ -264,7 +251,7 @@ def login_page():
 
 @app.route('/register-page')
 def register_page():
-    return render_template_string(BASE_LAYOUT.replace('{% block content %}{% endblock %}', '<h2>Register</h2><form method="POST" action="/auth/register"><div class="form-group"><label>Name</label><input type="text" name="name" required></div><div class="form-group"><label>Email</label><input type="email" name="email" required></div><div class="form-group"><label>Password</label><input type="password" name="password" required></div><div class="form-group"><label>Role</label><select name="role"><option value="customer">Customer</option><option value="provider">Provider</option></select></div><button type="submit" class="btn">Register</button></form>'))
+    return render_template_string(BASE_LAYOUT.replace('{% block content %}{% endblock %}', '<h2>Register</h2><form method="POST" action="/auth/register"><div class="form-group"><label>Name</label><input type="text" name="name" required></div><div class="form-group"><label>Email</label><input type="email" name="email" required></div><div class="form-group"><label>Password</label><input type="password" name="password" required></div><div class="form-group"><label>Role</label><select name="role"><option value="customer">Customer</option><option value="provider">Provider</option></select></div><button type="submit" class="btn">Register</button></form><p><a href="/login-page">Back to Login</a></p>'))
 
 @app.route('/customer')
 def customer_dashboard():
@@ -276,19 +263,33 @@ def customer_dashboard():
 def provider_dashboard():
     return render_template_string(PROVIDER_HTML)
 
-# API Auth
+# Unified Login supporting both Form and JSON requests
 @app.route('/auth/login', methods=['POST'])
 def login():
-    email = request.form.get('email')
-    password = request.form.get('password')
+    if request.is_json:
+        data = request.get_json()
+        email = data.get('email')
+        password = data.get('password')
+        is_api = True
+    else:
+        email = request.form.get('email')
+        password = request.form.get('password')
+        is_api = False
+
     with get_db() as conn:
-        user = conn.cursor().execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        user = conn.cursor().execute("SELECT * FROM users WHERE email = ? AND password_hash = ?", (email, password)).fetchone()
+
     if user:
         session['user_id'] = user['id']
         session['role'] = user['role']
+        if is_api:
+            return jsonify({"message": "Login successful", "role": user['role']}), 200
         if user['role'] == 'provider':
             return redirect('/provider')
         return redirect('/customer')
+    
+    if is_api:
+        return jsonify({"error": "Invalid email or password"}), 401
     return render_template_string(LOGIN_HTML, error="Invalid email or password")
 
 @app.route('/auth/register', methods=['POST'])
@@ -300,7 +301,7 @@ def register():
     try:
         with get_db() as conn:
             cursor = conn.cursor()
-            cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, 'hash', ?)", (name, email, role))
+            cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)", (name, email, password, role))
             if role == 'provider':
                 cursor.execute("INSERT INTO providers (user_id, category, bio) VALUES (?, 'General', '')", (cursor.lastrowid,))
             conn.commit()
@@ -308,7 +309,6 @@ def register():
     except Exception as e:
         return f"Registration Error: {str(e)}"
 
-# Appointments API
 @app.route('/appointments', methods=['POST'])
 def create_appointment():
     data = request.get_json() or request.form
@@ -330,7 +330,6 @@ def create_appointment():
     with get_db() as conn:
         cursor = conn.cursor()
         
-        # Monthly limit rule
         year_month = start_dt.strftime('%Y-%m')
         if cursor.execute("SELECT id FROM appointments WHERE customer_id = ? AND status = 'booked' AND strftime('%Y-%m', start_time) = ?", (customer_id, year_month)).fetchone():
             return jsonify({"error": "Monthly limit reached: already booked this month."}), 400
@@ -343,7 +342,6 @@ def create_appointment():
                            (booking_ref, customer_id, provider_id, start_time_str, end_time_str))
             conn.commit()
         except sqlite3.IntegrityError:
-            # Enforces 409 Conflict for double booking
             return jsonify({"error": "Conflict: This slot is already booked."}), 409
 
     return jsonify({"message": "Booked successfully", "booking_ref": booking_ref}), 201
