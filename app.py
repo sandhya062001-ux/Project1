@@ -15,7 +15,6 @@ def get_db():
     return conn
 
 def init_db():
-    # Cleanly remove old database to avoid schema column mismatch issues on boot
     if os.path.exists(DB_FILE):
         try:
             os.remove(DB_FILE)
@@ -80,14 +79,12 @@ def init_db():
             )
         ''')
         
-        # Unique index ensuring no two active 'booked' appointments share the same provider and start time
         cursor.execute('''
             CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_active_slot 
             ON appointments(provider_id, start_time) 
             WHERE status = 'booked'
         ''')
         
-        # Performance indexes
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_appointments_customer ON appointments(customer_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_appointments_provider ON appointments(provider_id, start_time)')
 
@@ -134,6 +131,21 @@ def init_db():
         conn.commit()
 
 init_db()
+
+# --- ROOT WELCOME ROUTE ---
+@app.route('/')
+def index():
+    return jsonify({
+        "message": "Appointment Booking System API is live!",
+        "status": "Running successfully",
+        "documentation": {
+            "register": "POST /auth/register",
+            "login": "POST /auth/login",
+            "get_providers": "GET /providers",
+            "get_slots": "GET /providers/{id}/slots?date=YYYY-MM-DD",
+            "book_appointment": "POST /appointments"
+        }
+    }), 200
 
 # --- AUTHENTICATION & REGISTRATION ENDPOINTS ---
 @app.route('/auth/register', methods=['POST'])
@@ -328,7 +340,6 @@ def create_appointment():
     with get_db() as conn:
         cursor = conn.cursor()
         
-        # Monthly limit rule check for customer
         year_month = start_dt.strftime('%Y-%m')
         existing_month_appt = cursor.execute('''
             SELECT id FROM appointments 
