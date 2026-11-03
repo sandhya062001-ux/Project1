@@ -14,12 +14,6 @@ def get_db():
     return conn
 
 def init_db():
-    if os.path.exists(DB_FILE):
-        try:
-            os.remove(DB_FILE)
-        except Exception:
-            pass
-
     with get_db() as conn:
         cursor = conn.cursor()
         
@@ -102,28 +96,37 @@ def init_db():
             )
         ''')
         
-        # --- SEED 7 PROVIDERS & TEST CUSTOMER ---
-        seed_providers = [
-            ("Dr. John Smith", "dr.smith@test.com", "Doctor", "General practitioner with 10 years experience."),
-            ("Dr. Emily Jones", "dr.jones@test.com", "Dentist", "Specialist in cosmetic and family dentistry."),
-            ("Dr. Robert Adams", "dr.adams@test.com", "Cardiologist", "Board-certified heart specialist."),
-            ("Lisa Therapy", "provider.lisa@test.com", "Therapist", "Licensed mental health counselor."),
-            ("Mark Dermatology", "provider.mark@test.com", "Dermatologist", "Skin care and clinical treatments."),
-            ("Sarah Pediatrics", "provider.sarah@test.com", "Pediatrician", "Dedicated child healthcare provider."),
-            ("Kevin Neurology", "provider.kevin@test.com", "Neurologist", "Brain and nervous system disorders specialist.")
-        ]
-        
-        for name, email, category, bio in seed_providers:
-            cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, 'password123', 'provider')", (name, email))
-            user_id = cursor.lastrowid
-            cursor.execute("INSERT INTO providers (user_id, category, bio, slot_minutes) VALUES (?, ?, ?, 30)", (user_id, category, bio))
-            prov_id = cursor.lastrowid
+        # Check if providers already exist before seeding to avoid duplicate entries
+        existing_provider = cursor.execute("SELECT id FROM providers LIMIT 1").fetchone()
+        if not existing_provider:
+            seed_providers = [
+                ("Dr. John Smith", "dr.smith@test.com", "Doctor", "General practitioner with 10 years experience."),
+                ("Dr. Emily Jones", "dr.jones@test.com", "Dentist", "Specialist in cosmetic and family dentistry."),
+                ("Dr. Robert Adams", "dr.adams@test.com", "Cardiologist", "Board-certified heart specialist."),
+                ("Lisa Therapy", "provider.lisa@test.com", "Therapist", "Licensed mental health counselor."),
+                ("Mark Dermatology", "provider.mark@test.com", "Dermatologist", "Skin care and clinical treatments."),
+                ("Sarah Pediatrics", "provider.sarah@test.com", "Pediatrician", "Dedicated child healthcare provider."),
+                ("Kevin Neurology", "provider.kevin@test.com", "Neurologist", "Brain and nervous system disorders specialist.")
+            ]
             
-            for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']:
-                cursor.execute("INSERT INTO availability (provider_id, day_of_week, start_time, end_time) VALUES (?, ?, '09:00', '17:00')", (prov_id, day))
+            for name, email, category, bio in seed_providers:
+                try:
+                    cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, 'password123', 'provider')", (name, email))
+                    user_id = cursor.lastrowid
+                    cursor.execute("INSERT INTO providers (user_id, category, bio, slot_minutes) VALUES (?, ?, ?, 30)", (user_id, category, bio))
+                    prov_id = cursor.lastrowid
+                    
+                    for day in ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']:
+                        cursor.execute("INSERT INTO availability (provider_id, day_of_week, start_time, end_time) VALUES (?, ?, '09:00', '17:00')", (prov_id, day))
+                except sqlite3.IntegrityError:
+                    pass
 
-        cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES ('Test Customer', 'customer@test.com', 'password123', 'customer')")
-        conn.commit()
+            try:
+                cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES ('Test Customer', 'customer@test.com', 'password123', 'customer')")
+            except sqlite3.IntegrityError:
+                pass
+
+            conn.commit()
 
 init_db()
 
@@ -568,7 +571,6 @@ def login():
         return redirect('/customer')
     return render_template_string(AUTH_HTML, error="Invalid email or password")
 
-# --- FORGOT PASSWORD ROUTE ---
 @app.route('/auth/forgot-password', methods=['POST'])
 def forgot_password():
     email = request.form.get('email')
@@ -585,7 +587,6 @@ def forgot_password():
         
     return render_template_string(FORGOT_PASSWORD_HTML, success="Password updated successfully! You can now log in.")
 
-# --- STRICT DUPLICATE REGISTRATION RESTRICTION ROUTE ---
 @app.route('/auth/register', methods=['POST'])
 def register():
     name = request.form.get('name')
@@ -596,14 +597,14 @@ def register():
     try:
         with get_db() as conn:
             cursor = conn.cursor()
-            # SQLite UNIQUE INDEX on email will raise IntegrityError if email already exists
             cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)", (name, email, password, role))
             if role == 'provider':
                 cursor.execute("INSERT INTO providers (user_id, category, bio) VALUES (?, 'General', '')", (cursor.lastrowid,))
             conn.commit()
         return redirect('/login-page')
-    except sqlite3.IntegrityError:
-        return render_template_string(AUTH_HTML, reg_error="Registration failed: This email address is already registered.")
+    except Exception as e:
+        # Catches any error (including duplicate email IntegrityError) and displays it cleanly without crashing the server
+        return render_template_string(AUTH_HTML, reg_error=f"Registration failed: Email may already exist or invalid input.")
 
 @app.route('/appointments', methods=['POST'])
 def create_appointment():
