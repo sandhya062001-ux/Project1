@@ -23,6 +23,7 @@ def init_db():
     with get_db() as conn:
         cursor = conn.cursor()
         
+        # 1. Users table with UNIQUE constraint on email
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,6 +35,7 @@ def init_db():
             )
         ''')
         
+        # 2. Providers table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS providers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,6 +48,7 @@ def init_db():
             )
         ''')
         
+        # 3. Availability table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS availability (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,6 +60,7 @@ def init_db():
             )
         ''')
         
+        # 4. Appointments table with Unique Index for 409 Conflict protection
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS appointments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,6 +87,7 @@ def init_db():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_appointments_customer ON appointments(customer_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_appointments_provider ON appointments(provider_id, start_time)')
 
+        # 5. Appointment History audit trail
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS appointment_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,6 +102,7 @@ def init_db():
             )
         ''')
         
+        # --- SEED 7 PROVIDERS & TEST CUSTOMER ---
         seed_providers = [
             ("Dr. John Smith", "dr.smith@test.com", "Doctor", "General practitioner with 10 years experience."),
             ("Dr. Emily Jones", "dr.jones@test.com", "Dentist", "Specialist in cosmetic and family dentistry."),
@@ -145,6 +151,8 @@ BASE_LAYOUT = '''
         .error { color: red; margin-bottom: 15px; font-weight: bold; }
         .success { color: green; margin-bottom: 15px; font-weight: bold; }
         .nav-links { margin-bottom: 20px; }
+        .link-muted { color: #0066cc; text-decoration: none; font-size: 13px; }
+        .link-muted:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -183,10 +191,12 @@ AUTH_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
                     <input type="password" name="password" value="password123" required>
                 </div>
                 <button type="submit" class="btn">Login</button>
+                <p style="margin-top: 10px;"><a href="/forgot-password-page" class="link-muted">Forgot Password?</a></p>
             </form>
         </div>
         <div style="flex: 1;">
             <h2>Register</h2>
+            {% if reg_error %}<div class="error">{{ reg_error }}</div>{% endif %}
             <form method="POST" action="/auth/register">
                 <div class="form-group">
                     <label>Full Name</label>
@@ -211,6 +221,26 @@ AUTH_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
             </form>
         </div>
     </div>
+''')
+
+FORGOT_PASSWORD_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
+    <div class="nav-links">
+        <a href="/login-page" class="btn" style="background:#666; padding: 5px 15px; font-size: 13px;">← Back to Login</a>
+    </div>
+    <h2>Reset Password</h2>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    {% if success %}<div class="success">{{ success }}</div>{% endif %}
+    <form method="POST" action="/auth/forgot-password">
+        <div class="form-group">
+            <label>Registered Email Address</label>
+            <input type="email" name="email" required placeholder="your-email@example.com">
+        </div>
+        <div class="form-group">
+            <label>New Password</label>
+            <input type="password" name="new_password" required placeholder="Enter new secure password">
+        </div>
+        <button type="submit" class="btn">Reset Password</button>
+    </form>
 ''')
 
 CUSTOMER_HTML = BASE_LAYOUT.replace('{% block content %}{% endblock %}', '''
@@ -418,6 +448,10 @@ def index():
 def login_page():
     return render_template_string(AUTH_HTML)
 
+@app.route('/forgot-password-page')
+def forgot_password_page():
+    return render_template_string(FORGOT_PASSWORD_HTML)
+
 @app.route('/customer')
 def customer_dashboard():
     with get_db() as conn:
@@ -482,7 +516,7 @@ def get_provider_slots(id):
 
 @app.route('/appointments/mine', methods=['GET'])
 def get_my_appointments():
-    customer_id = 1 # Test customer ID
+    customer_id = 1
     with get_db() as conn:
         appts = conn.cursor().execute("SELECT * FROM appointments WHERE customer_id = ? ORDER BY start_time DESC", (customer_id,)).fetchall()
     return jsonify([dict(a) for a in appts]), 200
@@ -534,22 +568,42 @@ def login():
         return redirect('/customer')
     return render_template_string(AUTH_HTML, error="Invalid email or password")
 
+# --- FORGOT PASSWORD ROUTE ---
+@app.route('/auth/forgot-password', methods=['POST'])
+def forgot_password():
+    email = request.form.get('email')
+    new_password = request.form.get('new_password')
+    
+    with get_db() as conn:
+        cursor = conn.cursor()
+        user = cursor.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
+        if not user:
+            return render_template_string(FORGOT_PASSWORD_HTML, error="Email address not found in our system.")
+        
+        cursor.execute("UPDATE users SET password_hash = ? WHERE email = ?", (new_password, email))
+        conn.commit()
+        
+    return render_template_string(FORGOT_PASSWORD_HTML, success="Password updated successfully! You can now log in.")
+
+# --- STRICT DUPLICATE REGISTRATION RESTRICTION ROUTE ---
 @app.route('/auth/register', methods=['POST'])
 def register():
     name = request.form.get('name')
     email = request.form.get('email')
     password = request.form.get('password')
     role = request.form.get('role', 'customer')
+    
     try:
         with get_db() as conn:
             cursor = conn.cursor()
+            # SQLite UNIQUE INDEX on email will raise IntegrityError if email already exists
             cursor.execute("INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)", (name, email, password, role))
             if role == 'provider':
                 cursor.execute("INSERT INTO providers (user_id, category, bio) VALUES (?, 'General', '')", (cursor.lastrowid,))
             conn.commit()
         return redirect('/login-page')
-    except Exception as e:
-        return render_template_string(AUTH_HTML, error=f"Registration failed: Email may already exist.")
+    except sqlite3.IntegrityError:
+        return render_template_string(AUTH_HTML, reg_error="Registration failed: This email address is already registered.")
 
 @app.route('/appointments', methods=['POST'])
 def create_appointment():
